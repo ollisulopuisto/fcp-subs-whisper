@@ -12,7 +12,10 @@ dependencies = [
 ]
 
 [project.scripts]
-fcp-subs-whisper = "main:cli"
+fcp-subs-whisper = "fcp_subs_whisper.main:cli"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/fcp_subs_whisper"]
 
 [build-system]
 requires = ["hatchling"]
