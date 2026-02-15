@@ -189,5 +189,8 @@ async def main():
     write_srt(all_segments, srt_path)
     print("Done!")
 
-if __name__ == "__main__":
+def cli():
     asyncio.run(main())
+
+if __name__ == "__main__":
+    cli()
