@@ -14,6 +14,13 @@ try:
 except ImportError:
     mlx_whisper = None
 
+# Diarization
+try:
+    from pyannote.audio import Pipeline
+    import torch
+except ImportError:
+    Pipeline = None
+
 # Wyoming imports
 try:
     from wyoming.audio import AudioChunk, AudioStart, AudioStop
@@ -63,7 +70,11 @@ def write_ssa(segments, output_path):
             start = format_timestamp(segment.get('start'), "ssa")
             end = format_timestamp(segment.get('end'), "ssa")
             text = segment.get('text').strip()
-            f.write(f"Dialogue: 0,{start},{end},Default,,0,0,0,,{text}\n")
+            speaker = segment.get('speaker', '')
+            if speaker:
+                f.write(f"Dialogue: 0,{start},{end},Default,{speaker},0,0,0,,{speaker}: {text}\n")
+            else:
+                f.write(f"Dialogue: 0,{start},{end},Default,,0,0,0,,{text}\n")
 
 def write_srt(segments, output_path):
     with open(output_path, "w", encoding="utf-8") as f:
@@ -71,7 +82,53 @@ def write_srt(segments, output_path):
             start = format_timestamp(segment.get('start'), "srt")
             end = format_timestamp(segment.get('end'), "srt")
             text = segment.get('text').strip()
-            f.write(f"{i}\n{start} --> {end}\n{text}\n\n")
+            speaker = segment.get('speaker', '')
+            display_text = f"[{speaker}] {text}" if speaker else text
+            f.write(f"{i}\n{start} --> {end}\n{display_text}\n\n")
+
+def diarize(input_path, hf_token):
+    if Pipeline is None:
+        print("Error: pyannote.audio not installed.")
+        return []
+    
+    print("Loading diarization pipeline from Hugging Face...")
+    pipeline = Pipeline.from_pretrained(
+        "pyannote/speaker-diarization-3.1",
+        use_auth_token=hf_token
+    )
+    
+    # Move to GPU if available
+    device = torch.device("cpu")
+    if torch.backends.mps.is_available():
+        device = torch.device("mps")
+    elif torch.cuda.is_available():
+        device = torch.device("cuda")
+    
+    print(f"Using device: {device}")
+    pipeline.to(device)
+
+    print("Diarizing audio (this may take a while)...")
+    diarization = pipeline(input_path)
+    
+    speaker_segments = []
+    for turn, _, speaker in diarization.itertracks(yield_label=True):
+        speaker_segments.append({
+            "start": turn.start,
+            "end": turn.end,
+            "speaker": speaker
+        })
+    return speaker_segments
+
+def assign_speakers(transcript_segments, speaker_segments):
+    for t_seg in transcript_segments:
+        center_time = (t_seg["start"] + t_seg["end"]) / 2
+        best_speaker = "Unknown"
+        for s_seg in speaker_segments:
+            if s_seg["start"] <= center_time <= s_seg["end"]:
+                best_speaker = s_seg["speaker"]
+                break
+        t_seg["speaker"] = best_speaker
+    return transcript_segments
 
 def transcribe_mlx(input_path, model_path, language=None):
     if mlx_whisper is None:
@@ -79,7 +136,6 @@ def transcribe_mlx(input_path, model_path, language=None):
         return []
     
     print(f"Transcribing with native MLX (Turbo v3) using {model_path}...")
-    # mlx_whisper uses OpenAI-like output format
     result = mlx_whisper.transcribe(
         input_path,
         path_or_hf_repo=model_path,
@@ -129,6 +185,7 @@ async def transcribe_wyoming(input_path, uri, language=None):
                 if event is None: break
                 if Transcript.is_type(event.type):
                     transcript = Transcript.from_event(event)
+                    # Wyoming doesn't give timestamps in a simple way here, simplified
                     segments.append({"start": 0, "end": 0, "text": transcript.text})
                     break
     finally:
@@ -158,6 +215,8 @@ async def main():
     parser.add_argument("--model", default="mlx-community/whisper-large-v3-turbo", 
                         help="Model path or name")
     parser.add_argument("--language", default=None, help="Language code (e.g. fi)")
+    parser.add_argument("--diarize", action="store_true", help="Perform speaker diarization")
+    parser.add_argument("--hf-token", help="Hugging Face token for diarization")
     parser.add_argument("--wyoming-uri", default="tcp://127.0.0.1:10300", help="Wyoming server URI")
     
     args = parser.parse_args()
@@ -165,13 +224,12 @@ async def main():
         print(f"Error: File {args.input} not found.")
         sys.exit(1)
 
+    # Transcription
     if args.method == "mlx":
-        # mlx_whisper uses the Apple Silicon Neural Engine directly
         all_segments = transcribe_mlx(args.input, args.model, args.language)
     elif args.method == "wyoming":
         all_segments = await transcribe_wyoming(args.input, args.wyoming_uri, args.language)
     else:
-        # Fallback to faster-whisper (CPU optimized)
         model_name = "large-v3-turbo" if "turbo" in args.model else "small"
         all_segments = transcribe_local(args.input, model_name, args.language, "cpu")
 
@@ -179,11 +237,38 @@ async def main():
         print("No transcription generated.")
         return
 
+    # Diarization
+    if args.diarize:
+        if not args.hf_token:
+            args.hf_token = os.environ.get("HF_TOKEN")
+        
+        if not args.hf_token:
+            print("\nError: --hf-token or HF_TOKEN environment variable required for diarization.")
+            print("Get one at https://huggingface.co/settings/tokens")
+            sys.exit(1)
+
+        speaker_segments = diarize(args.input, args.hf_token)
+        all_segments = assign_speakers(all_segments, speaker_segments)
+        
+        # Identify unique speakers and ask for names
+        unique_speakers = sorted(list(set(s["speaker"] for s in all_segments if "speaker" in s)))
+        speaker_map = {}
+        print(f"\nIdentified {len(unique_speakers)} speakers.")
+        for spk in unique_speakers:
+            try:
+                name = input(f"Enter name for {spk} (or press Enter to keep default): ").strip()
+                speaker_map[spk] = name if name else spk
+            except EOFError:
+                speaker_map[spk] = spk
+        
+        for seg in all_segments:
+            seg["speaker"] = speaker_map.get(seg.get("speaker"), seg.get("speaker"))
+
     base_name = os.path.splitext(args.input)[0]
     ssa_path = f"{base_name}.ssa"
     srt_path = f"{base_name}.srt"
     
-    print(f"Writing SSA subtitles to {ssa_path}...")
+    print(f"\nWriting SSA subtitles to {ssa_path}...")
     write_ssa(all_segments, ssa_path)
     print(f"Writing SRT subtitles to {srt_path}...")
     write_srt(all_segments, srt_path)

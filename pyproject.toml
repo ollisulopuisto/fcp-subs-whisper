@@ -9,6 +9,8 @@ dependencies = [
     "mlx-whisper>=0.4.3",
     "tqdm>=4.67.3",
     "wyoming>=1.8.0",
+    "pyannote.audio>=3.3.1",
+    "torch>=2.5.1",
 ]
 
 [project.scripts]
