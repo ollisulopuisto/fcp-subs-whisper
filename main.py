@@ -31,9 +31,12 @@ def format_timestamp(seconds: float, format_type: str = "ssa") -> str:
     millis = int((td.total_seconds() - total_seconds) * 100)
     
     if format_type == "ssa":
+        # H:MM:SS.cc
+        millis = round((td.total_seconds() - total_seconds) * 100)
         return f"{hours}:{minutes:02d}:{secs:02d}.{millis:02d}"
     elif format_type == "srt":
-        millis_srt = int((td.total_seconds() - total_seconds) * 1000)
+        # HH:MM:SS,mmm
+        millis_srt = round((td.total_seconds() - total_seconds) * 1000)
         return f"{hours:02d}:{minutes:02d}:{secs:02d},{millis_srt:03d}"
     return str(seconds)
 
