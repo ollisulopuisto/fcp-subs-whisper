@@ -255,6 +255,11 @@ async def main():
         speaker_map = {}
         print(f"\nIdentified {len(unique_speakers)} speakers.")
         for spk in unique_speakers:
+            # Find a few example lines for this speaker
+            examples = [s["text"].strip() for s in all_segments if s.get("speaker") == spk][:3]
+            example_str = " | ".join(examples)
+            print(f"\nSpeaker: {spk}")
+            print(f"Examples: {example_str}")
             try:
                 name = input(f"Enter name for {spk} (or press Enter to keep default): ").strip()
                 speaker_map[spk] = name if name else spk
