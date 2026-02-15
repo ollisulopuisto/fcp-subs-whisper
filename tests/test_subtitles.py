@@ -1,6 +1,6 @@
 import os
 import pytest
-from main import format_timestamp, write_ssa, write_srt
+from fcp_subs_whisper.main import format_timestamp, write_ssa, write_srt
 
 def test_format_timestamp_ssa():
     assert format_timestamp(0, "ssa") == "0:00:00.00"
