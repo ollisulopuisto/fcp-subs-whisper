@@ -155,7 +155,7 @@ async def main():
     parser.add_argument("input", help="Path to video or audio file")
     parser.add_argument("--method", choices=["mlx", "faster", "wyoming"], default="mlx", 
                         help="Transcription method: mlx (native Apple Silicon), faster (local CPU), wyoming (server)")
-    parser.add_argument("--model", default="mlx-community/whisper-large-v3-turbo-qat-4bit", 
+    parser.add_argument("--model", default="mlx-community/whisper-large-v3-turbo", 
                         help="Model path or name")
     parser.add_argument("--language", default=None, help="Language code (e.g. fi)")
     parser.add_argument("--wyoming-uri", default="tcp://127.0.0.1:10300", help="Wyoming server URI")
